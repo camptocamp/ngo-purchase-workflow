@@ -14,6 +14,7 @@ class PurchaseOrder(orm.Model):
         ('sent', 'RFQ Sent'),
         ('draftbid', 'Draft Bid'),  # added
         ('bid', 'Bid Encoded'),  # Bid Received renamed into Bid Encoded
+        ('bid_selected', 'Bid selected'), # added
         ('draftpo', 'Draft PO'),  # added
         ('confirmed', 'Waiting Approval'),
         ('approved', 'Purchase Confirmed'),
@@ -236,17 +237,22 @@ class PurchaseOrder(orm.Model):
         value['value']['dest_address_id'] = dest_id
         return value
 
+    def po_tender_requisition_selected(self, cr, uid, ids, context=None):
+        """Workflow function that write state 'bid selected'"""
+        return self.write(cr, uid, ids, {'state': 'bid_selected'},
+                          context=context)
+
 
 class purchase_order_line(orm.Model):
     _inherit = 'purchase.order.line'
 
     def onchange_product_id(self, cr, uid, ids, pricelist_id, product_id, qty, uom_id,
             partner_id, date_order=False, fiscal_position_id=False, date_planned=False,
-            name=False, price_unit=False, context=None, state='draft', type='rfq', **kwargs):
+            name=False, price_unit=False, context=None, state='draftpo', type='purchase', **kwargs):
         res = super(purchase_order_line, self).onchange_product_id(cr, uid, ids,
                 pricelist_id, product_id, qty, uom_id, partner_id, date_order,
                 fiscal_position_id, date_planned, name, price_unit, context)
-        if state == 'draft' and type == 'bid':
+        if state == 'draft' and type == 'rfq':
             res['value'].update({'price_unit': 0})
         elif state in ('sent', 'draftbid', 'bid'):
             if 'price_unit' in res['value']:

@@ -25,15 +25,33 @@ class PurchaseRequisition(orm.Model):
                                          domain=[('type', 'in', ('rfq', 'bid'))]),
         # new
         'req_validity': fields.date("Requested Bid's End of Validity",
-                                    help="Default value requested to "
-                                         "the supplier."),
+                                    help="Requested validity period requested to the bidder, "
+                                         "i.e. please send bids that stay valid until that "
+                                         "date.\n The bidder is allowed to send a bid with "
+                                         "another validity end date that gets encoded in the "
+                                         "bid."),
         'bid_tendering_mode': fields.selection([('open', 'Open'),
                                                 ('restricted', 'Restricted')],
                                                'Call for Bids Mode'),
+                                               help="- Restricted : you select yourself the "
+                                                    "bidders and generate a RFQ for each of "
+                                                    "those. \n"
+                                                    "- Open : anybody can bid (you have to "
+                                                    "advertise the call for bids) and you "
+                                                    "directly encode the bids you received. "
+                                                    "You are still able to generate RFQ if "
+                                                    "you want to contact usual bidders."),
         'bid_receipt_mode': fields.selection([('open', 'Open'),
                                               ('sealed', 'Sealed')],
                                              'Bid Receipt Mode',
                                              required=True),
+                                             help="- Open : The bids can be opened when "
+                                                  "received and encoded. \n"
+                                                  "- Closed : The bids can be marked as "
+                                                  "received but they have to be opened \n"
+                                                  "all at the same time after an opening "
+                                                  "ceremony (probably specific to public "
+                                                  "sector)."),
         'consignee_id': fields.many2one('res.partner',
                                         'Consignee',
                                         help="Person responsible of delivery"),
@@ -55,6 +73,13 @@ class PurchaseRequisition(orm.Model):
             'account.payment.term',
             'Requested Payment Term',
             help="Default value requested to the supplier."),
+        'pricelist_id': fields.many2one('product.pricelist', 
+            'Pricelist',
+            help="If set that pricelist will be used to generate the RFQ."
+            "Mostely used to ask a requisition in a given currency."),
+        'date_end': fields.datetime('Bid Submission Deadline', 
+                                    help="All bids received after that date won't be valid "
+                                         " (probably specific to public sector)."),
     }
     _defaults = {
         'bid_receipt_mode': 'open',
@@ -83,6 +108,8 @@ class PurchaseRequisition(orm.Model):
             'incoterm_id': requisition.req_incoterm_id.id,
             'incoterm_address': requisition.req_incoterm_address,
         })
+        if requisition.pricelist_id:
+            values['pricelist_id'] = requisition.pricelist_id.id
         return values
 
     def _prepare_purchase_order_line(self, cr, uid, requisition,
@@ -142,18 +169,34 @@ class PurchaseRequisition(orm.Model):
                              context=context)
         return super(PurchaseRequisition, self).generate_po(cr, uid, [ids], context=context)
 
+    def quotation_selected(self, cr, uid, quotation, context=None):
+        """Predicate that checks if a quotation has at least one line chosen
+        :param quotation: record of 'purchase.order'
+
+        :returns: True if one line has been chosen
+
+        """
+        # This topic is subject to changes
+        return quotation.bid_partial
+
     def cancel_quotation(self, cr, uid, tender, context=None):
         """
         Called from generate_po. Cancel only draft and sent rfq
         """
         po = self.pool.get('purchase.order')
         wf_service = netsvc.LocalService("workflow")
+        tender.refresh()
         for quotation in tender.purchase_ids:
-            if quotation.state in ['draft', 'sent']:
-                wf_service.trg_validate(uid, 'purchase.order', quotation.id, 'purchase_cancel', cr)
-                po.message_post(cr, uid, [quotation.id],
-                        body=_('Canceled by the call for bids associated to this request for quotation.'),
-                        context=context)
+            if quotation.state in ['draft', 'sent', 'bid']:
+                if self.quotation_selected(cr, uid, quotation, context=context):
+                    wf_service.trg_validate(uid, 'purchase.order', quotation.id,
+                                            'select_requisition', cr)
+                else:
+                    wf_service.trg_validate(uid, 'purchase.order', quotation.id, 'purchase_cancel', cr)
+                    po.message_post(cr, uid, [quotation.id],
+                                    body=_('Canceled by the call for bids associated'
+                                           ' to this request for quotation.'),
+                                    context=context)
 
         return True
 
@@ -226,19 +269,6 @@ class PurchaseRequisition(orm.Model):
         res['domain'] = expression.AND([eval(res.get('domain', [])), [('requisition_id', 'in', ids)]])
         return res
 
-    def open_product_line(self, cr, uid, ids, context=None):
-        """ Filter to show only lines from bids received. Group by requisition line instead of product for unicity
-        """
-        res = super(PurchaseRequisition, self).open_product_line(cr, uid, ids, context=context)
-        ctx = res.setdefault('context', {})
-        if 'search_default_groupby_product' in ctx:
-            del ctx['search_default_groupby_product']
-        if 'search_default_hide_cancelled' in ctx:
-            del ctx['search_default_hide_cancelled']
-        ctx['search_default_groupby_requisitionline'] = True
-        ctx['search_default_showbids'] = True
-        return res
-
     def close_callforbids(self, cr, uid, ids, context=None):
         """
         Check all quantities have been sourced
@@ -288,6 +318,19 @@ class PurchaseRequisition(orm.Model):
             'target': 'new',
             'context': ctx,
         }
+
+    def open_product_line(self, cr, uid, ids, context=None):
+        """ Filter to show only lines from bids received. Group by requisition line instead of product for unicity
+        """
+        res = super(PurchaseRequisition, self).open_product_line(cr, uid, ids, context=context)
+        ctx = res.setdefault('context', {})
+        if 'search_default_groupby_product' in ctx:
+            del ctx['search_default_groupby_product']
+        if 'search_default_hide_cancelled' in ctx:
+            del ctx['search_default_hide_cancelled']
+        ctx['search_default_groupby_requisitionline'] = True
+        ctx['search_default_showbids'] = True
+        return res
 
     def close_callforbids_ok(self, cr, uid, ids, context=None):
         wf_service = netsvc.LocalService("workflow")
