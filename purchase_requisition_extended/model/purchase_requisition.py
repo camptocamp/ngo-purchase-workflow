@@ -395,7 +395,7 @@ class PurchaseRequisition(orm.Model):
         for id in ids:
             wf_service.trg_validate(uid, 'purchase.requisition',
                                     id, 'close_bid', cr)
-        return False
+        return True
 
 
 class purchase_requisition_line(orm.Model):
