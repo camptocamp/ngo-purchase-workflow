@@ -352,7 +352,7 @@ class PurchaseRequisition(orm.Model):
                     qty -= pol.quantity_bid
             if qty == line.product_qty:
                 break  # nothing selected
-            compare = float_compare(qty, 0, precision_digits=precision)
+            compare = float_compare(qty, 0, precision_digits=0)
             if compare != 0:
                 break  # too much or too few selected
         else:
