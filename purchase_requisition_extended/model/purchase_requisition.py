@@ -352,6 +352,8 @@ class PurchaseRequisition(orm.Model):
                     qty -= pol.quantity_bid
             if qty == line.product_qty:
                 break  # nothing selected
+            '''' Precision is set to 0 because we deal with integer only
+             And we want to prevent rounding issue '''
             compare = float_compare(qty, 0, precision_digits=0)
             if compare != 0:
                 break  # too much or too few selected
